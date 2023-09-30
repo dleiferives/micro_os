@@ -283,11 +283,86 @@ void read_bytes_to_char_arr(FILE * fp, char * source, int * cursor, int offset_s
 
 }
 
+int FAT_Device_identify_fat_type(FAT_Device *d) {
+    // Calculate RootDirSectors
+    int RootDirSectors;
+    if (d->FAT_Type_Val == 32) {
+        // For FAT32 volumes, RootDirSectors is always 0
+        RootDirSectors = 0;
+    } else {
+        RootDirSectors = ((d->BPB_RootEntCnt * 32) + (d->BPB_BytsPerSec - 1)) / d->BPB_BytsPerSec;
+    }
+
+    // Calculate DataSec
+    int FATSz, TotSec, DataSec;
+    if (d->FAT_Type_Val == 12 || d->FAT_Type_Val == 16) {
+        FATSz = d->BPB_FATSz16;
+    } else {
+        FATSz = d->BPB_FATSz32;
+    }
+
+    if (d->BPB_TotSec16 != 0) {
+        TotSec = d->BPB_TotSec16;
+    } else {
+        TotSec = d->BPB_TotSec32;
+    }
+
+    DataSec = TotSec - (d->BPB_RsvdSecCnt + (d->BPB_NumFATs * FATSz) + RootDirSectors);
+
+    // Calculate CountofClusters
+    int CountofClusters = DataSec / d->BPB_SecPerClus;
+
+    // Determine the FAT type based on the cluster count
+    if (CountofClusters < 4085) {
+        return 12;  // Volume is FAT12
+    } else if (CountofClusters < 65525) {
+        return 16;  // Volume is FAT16
+    } else {
+        return 32;  // Volume is FAT32
+    }
+}
+
+
 
 FAT_Device FAT_Device_init(FILE * fp)
 {
 	int cursor =0;
 	FAT_Device d;
-	d.BS_jmpBoot = read_bytes_to_int(fp,&cursor,0,0,3);
-	read_bytes_to_char_arr(fp,&d.BS_OEMName,&cursor,0,3,8);
-	d.BPB_BytsPerSec = read_bytes_to_int(fp,&cursor,0,11,2);
+
+	// Read and initialize the structure fields from the binary file
+    d.BS_jmpBoot = read_bytes_to_int(fp, &cursor, 0, 0, 3);
+    read_bytes_to_char_arr(fp, d.BS_OEMName, &cursor, 0, 3, 8);
+    d.BPB_BytsPerSec = read_bytes_to_int(fp, &cursor, 0, 11, 2);
+
+    // Initialize more fields based on the provided table
+    d.BPB_SecPerClus = read_bytes_to_int(fp, &cursor, 0, 13, 1);
+    d.BPB_RsvdSecCnt = read_bytes_to_int(fp, &cursor, 0, 14, 2);
+    d.BPB_NumFATs = read_bytes_to_int(fp, &cursor, 0, 16, 1);
+    d.BPB_RootEntCnt = read_bytes_to_int(fp, &cursor, 0, 17, 2);
+    d.BPB_TotSec16 = read_bytes_to_int(fp, &cursor, 0, 19, 2);
+    d.BPB_Media = read_bytes_to_int(fp, &cursor, 0, 21, 1);
+    d.BPB_FATSz16 = read_bytes_to_int(fp, &cursor, 0, 22, 2);
+    d.BPB_SecPerTrk = read_bytes_to_int(fp, &cursor, 0, 24, 2);
+    d.BPB_NumHeads = read_bytes_to_int(fp, &cursor, 0, 26, 2);
+    d.BPB_HiddSec = read_bytes_to_int(fp, &cursor, 0, 28, 4);
+    d.BPB_TotSec32 = read_bytes_to_int(fp, &cursor, 0, 32, 4);
+
+    // Set the FAT_Type_Val based on your logic (e.g., identify FAT12, FAT16, or FAT32)
+    d.FAT_Type_Val = FAT_Device_identify_fat_type(&d);
+    printf("FAT TYPE = %d\n",d.FAT_Type_Val);
+    exit(0); //TODO remove this exit lmao
+
+    // Based on the FAT type, initialize the appropriate FAT_Type struct inside the union
+    if (d.FAT_Type_Val == 12 || d.FAT_Type_Val == 16) {
+        // Initialize FAT_16_or_12_Device
+        // Example:
+        // d.FAT_Type_Specifics.FAT_16_or_12.BPB_RootEntCnt = read_bytes_to_int(fp, &cursor, 0, offset_for_RootEntCnt, 2);
+    } else if (d.FAT_Type_Val == 32) {
+        // Initialize FAT_32_Device
+        // Example:
+        // d.FAT_Type_Specifics.FAT_32.BPB_FATSz32 = read_bytes_to_int(fp, &cursor, 0, offset_for_FATSz32, 4);
+    }
+
+
+    return d;
+}
