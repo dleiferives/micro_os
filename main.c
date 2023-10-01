@@ -32,22 +32,7 @@ int main(int argc, char *argv[])
 		printf("file %s created\n", argv[1]);
 	}
 	
-	// go to fat name
-	for(int i=0; i<3;i++)
-	{
-		getc(fptr);
-	}
-
-	printf("The name of this fat device: ");
-	for(int i =0; i < 8; i++)
-	{
-		putchar(getc(fptr));
-	}
-	putchar(10);
-
-
-
-
+	FAT_Device d = FAT_Device_init(fptr);
 
 	return 0;
 }

@@ -1,0 +1,18 @@
+{
+      "adapter": "${HOME}/libs/cpptools/extension/debugAdapters/bin/OpenDebugAD7",
+	    "adapter_args": [],
+        "adapterID": "cppdbg",
+      "launch_args": {
+      // For the values that can be placed here,
+      // see https://code.visualstudio.com/docs/cpp/launch-json-reference
+      "type": "cppdbg",
+      "program": "${CUR_DIR}/main",
+      "args": [],
+      "cwd": "${CUR_DIR}",
+      "externalConsole": false,
+      "environment": [],
+      "MIMode": "gdb"
+      }
+}
+
+
