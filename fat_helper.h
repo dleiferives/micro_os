@@ -245,7 +245,10 @@ typedef struct {
 
     // Union of FAT32-specific entries and FAT16/FAT12-specific entries
     FAT_Type FAT_Type_Specifics;
-    int FAT_Type_Val;
+    long FAT_Type_Val;
+    long FirstDataSector;
+    long FATSz;
+    long RootDirSectors;
     // ... add more fields for other entries ...
 } FAT_Device;
 
@@ -256,40 +259,43 @@ unsigned int read_bytes_to_int(FILE * fp, int *cursor_loc,int offset_start, int 
 	while (*cursor_loc < (offset_start + offset))
 	{
 		getc(fp);
-		cursor_loc++;
+		*cursor_loc = *cursor_loc +1;
 	}
 
 	for(int i =0;i < size;i++)
 	{
-		result <<= 8;
-		result += (unsigned char)getc(fp);
-		cursor_loc++;
+		result += (unsigned char)getc(fp) << (i * 8);
+		*cursor_loc = *cursor_loc +1;
 	}
 	return result;
 }
 		
-void read_bytes_to_char_arr(FILE * fp, char * source, int * cursor, int offset_start, int offset, int size)
+void read_bytes_to_char_arr(FILE * fp, unsigned char * source, int * cursor, int offset_start, int offset, int size)
 {
+	printf("Cursor pre %d, ",*cursor);
 	while (*cursor < (offset_start + offset))
 	{
 		getc(fp);
-		cursor++;
+		*cursor = *cursor + 1;
 	}
+	printf("Cursor loc %d ofset %d, offset_start %d\n",*cursor,offset,offset_start);
 	for(int i =0; i<size; i++)
 	{
 		source[i] = getc(fp);
-		cursor++;
+		putchar(source[i]);
+		*cursor = *cursor + 1;
 	}
 
 }
 
 int FAT_Device_identify_fat_type_and_init(FAT_Device *d, int * c, FILE * fp) {
     // Calculate RootDirSectors
-    int RootDirSectors;
+    long RootDirSectors;
     RootDirSectors = ((d->BPB_RootEntCnt * 32) + (d->BPB_BytsPerSec - 1)) / d->BPB_BytsPerSec;
+    d->RootDirSectors = RootDirSectors;
 
     // Calculate DataSec
-    int FATSz, TotSec, DataSec;
+    long FATSz, TotSec, DataSec;
     if (d->BPB_FATSz16 != 0)
     {
 	    // init for fat 16 and 12 since they share the same types of data
@@ -304,6 +310,7 @@ int FAT_Device_identify_fat_type_and_init(FAT_Device *d, int * c, FILE * fp) {
 	    ft.FAT_16_or_12 = device;
 	    d->FAT_Type_Specifics = ft; 
 	    FATSz = d->BPB_FATSz16;
+	    d->FATSz = FATSz;
     } else
     {
 	    // init for fat 32  since they share the same types of data
@@ -326,6 +333,7 @@ int FAT_Device_identify_fat_type_and_init(FAT_Device *d, int * c, FILE * fp) {
 	    ft.FAT_32 = device;
 	    d->FAT_Type_Specifics = ft; 
 	    FATSz = d->FAT_Type_Specifics.FAT_32.BPB_FATSz32;
+	    d->FATSz = FATSz;
 	    
     }
 
@@ -354,11 +362,10 @@ int FAT_Device_identify_fat_type_and_init(FAT_Device *d, int * c, FILE * fp) {
 
 FAT_Device FAT_Device_init(FILE * fp)
 {
-	int cursor =0;
-	FAT_Device d;
+    int cursor =0;
+    FAT_Device d;
 
 	// Read and initialize the structure fields from the binary file
-    ;
     read_bytes_to_char_arr(fp, d.BS_jmpBoot, &cursor, 0, 0, 3);
     read_bytes_to_char_arr(fp, d.BS_OEMName, &cursor, 0, 3, 8);
     d.BPB_BytsPerSec = read_bytes_to_int(fp, &cursor, 0, 11, 2);
@@ -378,10 +385,64 @@ FAT_Device FAT_Device_init(FILE * fp)
 
     // Set the FAT_Type_Val based on your logic (e.g., identify FAT12, FAT16, or FAT32)
     d.FAT_Type_Val = FAT_Device_identify_fat_type_and_init(&d, &cursor, fp);
-    printf("FAT TYPE = %d\n",d.FAT_Type_Val);
+	
+    d.FirstDataSector = d.BPB_RsvdSecCnt + (d.BPB_NumFATs * d.FATSz) + d.RootDirSectors;
+
+    printf("FAT TYPE = %ld\n",d.FAT_Type_Val);
+    printf("FAT #sectors %d\n",d.BPB_TotSec16);
+    printf("RESERVED SECTORS %d \n",d.BPB_RsvdSecCnt);
+    printf("NUM FATS %ld \n",d.BPB_NumFATs);
+    printf("FATZ %ld\n",d.FATSz);
+    printf("ROOT DIR SECTOR %ld \n",d.RootDirSectors);
+    printf("First data sector %ld\n",d.FirstDataSector);
+    printf("FILENAME %s\n",d.BS_OEMName);
+    printf("BYTES PER SEC %d\n",d.BPB_BytsPerSec);
+
     exit(0); //TODO remove this exit lmao
 
     // Based on the FAT type, initialize the appropriate FAT_Type struct inside the union
-
+    // TODO
     return d;
 }
+
+
+
+int FAT_Device_first_sector_of_cluster(FAT_Device * d, int n)
+{
+	return ((n - 2) * d->BPB_SecPerClus) + d->FirstDataSector;
+}
+
+int FAT_Device_get_FAT_sector_number(FAT_Device * d, int n)
+{
+	if(d->FAT_Type_Val == 16)
+	{
+		int FATOffset = n * 2;
+		return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
+	}
+	if(d->FAT_Type_Val == 32)
+	{
+		int FATOffset = n * 4;
+		return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
+	}
+	int FATOffset = n + (n / 2);
+	return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
+}
+int FAT_Device_get_cluter_entry_offset(FAT_Device *d, int n)
+{
+	if(d->FAT_Type_Val == 16)
+	{
+		int FATOffset = n * 2;
+		return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
+	}
+	if(d->FAT_Type_Val == 32)
+	{
+		int FATOffset = n * 4;
+		return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
+	}
+	int FATOffset = n + (n / 2);
+	return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
+}
+
+
+
+
