@@ -125,6 +125,14 @@ typedef union {
 	FAT_16_or_12_Device FAT_16_or_12;	
 } FAT_Type;
 
+
+typedef struct{
+	unsigned int id;
+	unsigned int offset;
+	unsigned int entry_offset;
+	unsigned char data[]
+}FAT_Sector;
+
 typedef struct {
     // Jump instruction to boot code. This field has two allowed forms:
     // jmpBoot[0] = 0xEB, jmpBoot[1] = 0x??, jmpBoot[2] = 0x90
@@ -250,6 +258,8 @@ typedef struct {
     long FATSz;
     long RootDirSectors;
     // ... add more fields for other entries ...
+
+    FAT_Sector * sectors;
 } FAT_Device;
 
 unsigned int read_bytes_to_int(FILE * fp, int *cursor_loc,int offset_start, int offset, int size)
@@ -387,6 +397,14 @@ FAT_Device FAT_Device_init(FILE * fp)
     d.FAT_Type_Val = FAT_Device_identify_fat_type_and_init(&d, &cursor, fp);
 	
     d.FirstDataSector = d.BPB_RsvdSecCnt + (d.BPB_NumFATs * d.FATSz) + d.RootDirSectors;
+    if (d.FAT_Type_Val == 32)
+    {
+	    d.sectors = (FAT_Sector *)malloc(sizeof(FAT_Sector *) * d.BPB_TotSec32);
+	    //TODO FINISH THIS
+	    //TODO ALLOW FOR FLAGGING WETHER OR NOT TO STORE SECTORS IN RAM
+
+
+    }
 
     printf("FAT TYPE = %ld\n",d.FAT_Type_Val);
     printf("FAT #sectors %d\n",d.BPB_TotSec16);
@@ -397,6 +415,7 @@ FAT_Device FAT_Device_init(FILE * fp)
     printf("First data sector %ld\n",d.FirstDataSector);
     printf("FILENAME %s\n",d.BS_OEMName);
     printf("BYTES PER SEC %d\n",d.BPB_BytsPerSec);
+    printf("SEC PER CLUSTER %d\n",d.BPB_SecPerClus);
 
     exit(0); //TODO remove this exit lmao
 
@@ -427,7 +446,7 @@ int FAT_Device_get_FAT_sector_number(FAT_Device * d, int n)
 	int FATOffset = n + (n / 2);
 	return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
 }
-int FAT_Device_get_cluter_entry_offset(FAT_Device *d, int n)
+int FAT_Device_get_cluster_entry_offset(FAT_Device *d, int n)
 {
 	if(d->FAT_Type_Val == 16)
 	{
@@ -443,6 +462,15 @@ int FAT_Device_get_cluter_entry_offset(FAT_Device *d, int n)
 	return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
 }
 
+void FAT_Device_load_sector(FAT_Device * d, int sector_num)
+{
 
 
-
+unsigned short FAT_Device_16_get_entry_val(FAT_Device *d, int entry_offset)
+{
+	if (d->FAT_Type_Val != 16)
+	{
+		printf("wrong fat entry routine called\n");
+		exit(1);
+	}
+	return 
