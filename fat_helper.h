@@ -1,4 +1,11 @@
+#ifndef FAT_HELPER_LIB_dleiferives
+#define FAT_HELPER_LIB_dleiferives
 #define MAX_OEM_NAME_LENGTH 8
+#include <stdlib.h>
+int GLOBAL_FAT_DEVICE_SECTORS_IN_RAM =0;
+typedef u16 unsigned short;
+typedef u32 unsigned int;
+
 typedef struct {
 	    // This field is only defined for FAT32 media and does not exist on
 	    // FAT12 and FAT16 media. This field is the FAT32 32-bit count of
@@ -128,8 +135,8 @@ typedef union {
 
 typedef struct{
 	unsigned int id;
-	unsigned int offset;
-	unsigned int entry_offset;
+	//unsigned int offset;
+	//unsigned int entry_offset;
 	unsigned char data[]
 }FAT_Sector;
 
@@ -397,13 +404,16 @@ FAT_Device FAT_Device_init(FILE * fp)
     d.FAT_Type_Val = FAT_Device_identify_fat_type_and_init(&d, &cursor, fp);
 	
     d.FirstDataSector = d.BPB_RsvdSecCnt + (d.BPB_NumFATs * d.FATSz) + d.RootDirSectors;
-    if (d.FAT_Type_Val == 32)
+    if (GLOBAL_FAT_DEVICE_SECTORS_IN_RAM)
     {
-	    d.sectors = (FAT_Sector *)malloc(sizeof(FAT_Sector *) * d.BPB_TotSec32);
-	    //TODO FINISH THIS
-	    //TODO ALLOW FOR FLAGGING WETHER OR NOT TO STORE SECTORS IN RAM
-
-
+	    if (d.FAT_Type_Val == 32)
+	    {
+		    d.sectors = (FAT_Sector *)malloc(sizeof(FAT_Sector *) * d.BPB_TotSec32);
+		    //TODO FINISH THIS
+		    //TODO ALLOW FOR FLAGGING WETHER OR NOT TO STORE SECTORS IN RAM
+	    }else{
+		    d.sectors = (FAT_Sector *)malloc(sizeof(FAT_Sector *) * d.BPB_TotSec16);
+	    }
     }
 
     printf("FAT TYPE = %ld\n",d.FAT_Type_Val);
@@ -431,46 +441,127 @@ int FAT_Device_first_sector_of_cluster(FAT_Device * d, int n)
 	return ((n - 2) * d->BPB_SecPerClus) + d->FirstDataSector;
 }
 
-int FAT_Device_get_FAT_sector_number(FAT_Device * d, int n)
+int FAT_Device_get_cluster_sector_number(FAT_Device * d, int cluster_number)
 {
 	if(d->FAT_Type_Val == 16)
 	{
-		int FATOffset = n * 2;
+		int FATOffset = cluster_number * 2;
 		return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
 	}
 	if(d->FAT_Type_Val == 32)
 	{
-		int FATOffset = n * 4;
+		int FATOffset = cluster_number * 4;
 		return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
 	}
-	int FATOffset = n + (n / 2);
+	int FATOffset = cluster_number + (cluster_number / 2);
 	return d->BPB_RsvdSecCnt + (FATOffset / d->BPB_BytsPerSec);
 }
-int FAT_Device_get_cluster_entry_offset(FAT_Device *d, int n)
+int FAT_Device_get_cluster_entry_offset(FAT_Device *d, int cluster_number)
 {
 	if(d->FAT_Type_Val == 16)
 	{
-		int FATOffset = n * 2;
+		int FATOffset = cluster_number * 2;
 		return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
 	}
 	if(d->FAT_Type_Val == 32)
 	{
-		int FATOffset = n * 4;
+		int FATOffset = cluster_number * 4;
 		return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
 	}
-	int FATOffset = n + (n / 2);
+	int FATOffset = cluster_number + (cluster_number / 2);
 	return FATOffset - (d->BPB_BytsPerSec *(FATOffset / d->BPB_BytsPerSec));
 }
 
-void FAT_Device_load_sector(FAT_Device * d, int sector_num)
+// TODO this could be so much cleaner.
+// way too much nesting
+void FAT_Device_load_sector(FAT_Device * d, FILE * fp, int sector_num)
 {
+	// get the sector
+	// TODO: recommended to load two sectors on FAT12
+	if(d->sectors[sector_num])
+	{
+		// better not leak some memory!	
+		free(d->sectors[sector_num].data);
+		d->sectors[sector_num].data = (unsigned char *)malloc(sizeof(char) * d->BPB_BytsPerSec);
+		if(d->sectors[sector_num].id != sector_num)
+		{
+			printf("ERROR, sector does not alight with BPB data\n");
+			exit(0);
+		}
+	} else {
+		Sector s;
+		s.id = sector_num;
+		s.data = (unsigned char *)malloc(sizeof(char) * d->BPB_BytsPerSec);
+		d->sectors[sector_num] = s;
+
+	}
+	
+	// might as well just read it now from file istead of setting to zeros
+	// TODO implement global reading functions rather than some FSEEKs and such
+	fseek(fp, sector_num * d->BPB_BytsPerSec, SET_SEEK);
+
+	for (int i =0; i < d->BPB_BytsPerSec; i++)
+	{
+		d->sectors[sector_num].data[i] = getc(fp);
+	}
+	return;
+}
+// TODO :does not actually read two values. make it do so
+unsigned short FAT_Device_12_get_cluster_entry_val(FAT_Device *d, int cluster_number)
+{
+	if (d->FAT_Type_Val != 12)
+	{
+		printf("wrong fat entry routine called\n");
+		exit(1);
+	}
+	int sector_number = FAT_Device_get_cluster_sector_number(d, cluster_number);
+	if(!d->sectors[sector_number])
+	{
+		FAT_Device_load_sector(d, fp, sector_number);
+	}
+	int sector_offset = FAT_Device_get_cluster_entry_offset(d, cluster_number);
+	unsigned short cluster_first_entry = *((u16 *) &d->sectors[sector_number].data[sector_offset]);
+	if(cluster_first_entry & 0x1)
+	{
+		return cluster_first_entry >> 4;
+	} else {
+		return cluster_first_entry & 0x0FFF;
+	}
+}
+
+// TODO :does not actually read four values. make it do so
+unsigned int FAT_Device_32_get_cluster_entry_val(FAT_Device *d, int cluster_number)
+{
+	if (d->FAT_Type_Val != 32)
+	{
+		printf("wrong fat entry routine called\n");
+		exit(1);
+	}
+	int sector_number = FAT_Device_get_cluster_sector_number(d, cluster_number);
+	if(!d->sectors[sector_number])
+	{
+		FAT_Device_load_sector(d, fp, sector_number);
+	}
+	int sector_offset = FAT_Device_get_cluster_entry_offset(d, cluster_number);
+	
+	return *((u32 *) &d->sectors[sector_number].data[sector_offset]) & 0x0FFFFFFF;
+}
 
 
-unsigned short FAT_Device_16_get_entry_val(FAT_Device *d, int entry_offset)
+unsigned short FAT_Device_16_get_cluster_entry_val(FAT_Device *d, int cluster_number)
 {
 	if (d->FAT_Type_Val != 16)
 	{
 		printf("wrong fat entry routine called\n");
 		exit(1);
 	}
-	return 
+	int sector_number = FAT_Device_get_cluster_sector_number(d, cluster_number);
+	if(!d->sectors[sector_number])
+	{
+		FAT_Device_load_sector(d, fp, sector_number);
+	}
+	int sector_offset = FAT_Device_get_cluster_entry_offset(d, cluster_number);
+	
+	return *((u16 *) &d->sectors[sector_number].data[sector_offset])
+}
+#endif
