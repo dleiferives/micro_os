@@ -315,6 +315,29 @@ typedef union {
 	FAT_Dir_Entry_Long Long;
 }FAT_Dir_Entry;
 
+typedef struct{
+    unsigned int sector;
+    unsigned int entry;
+    uint8_t attr;
+}FAT_Dir_Entry_Location;
+
+typedef struct{
+    FAT_Dir_Entry_Location *locations;
+    uint32_t size;
+    uint32_t capacity;
+    uint32_t cluster;
+}FAT_Directory;
+extern void EX_ERROR(uint8_t *str);
+extern void EX_PRINT_STR(uint8_t *str);
+extern void EX_PRINT_STR_LEN(uint8_t *str, uint32_t len);
+extern void EX_PRINT_CHAR(uint8_t c);
+
+void FAT_Directory_print(FAT_Directory *dir, FAT_Device *device, FILE *fp);
+
+uint32_t FAT_Device_Sector_to_cluster(FAT_Device *d, FILE *fp, int sector);
+
+void FAT_Directory_collect(FAT_Directory *dir, FAT_Device *device, FILE *fp);
+
 
 unsigned int read_bytes_to_int(FILE *fp, int *cursor_loc, int offset_start,
                                int offset, int size);

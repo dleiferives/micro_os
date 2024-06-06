@@ -1,7 +1,7 @@
 
-truncate -s 100M disk16.img
-mkfs.vfat -F 16 disk16.img
-mkdir mnt16
-sudo mount -o loop,umask=0,uid=1000 disk16.img ./mnt16/
-cd mnt16
+truncate -s 100M disk18.img
+mkfs.vfat -F 16 disk18.img
+mkdir mnt18
+sudo mount -o loop,umask=0,uid=1000 disk18.img ./mnt18/
+cd mnt18
 

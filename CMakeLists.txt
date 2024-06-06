@@ -7,4 +7,6 @@ include_directories(.)
 
 add_executable(micro_os
         fat_helper.c
-        main.c)
+        main.c
+        lru_cache.c
+ansi_repl.c)

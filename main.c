@@ -2,10 +2,72 @@
 #include <stdlib.h>
 #include "fat_helper.h"
 #include "lru_cache.h"
+#include "ansi_repl.h"
 
 //TODO: verify BPB_Bytes_Per_Sector * BPB_Sectors_Per_Cluster <= 1024 * 32;
 //TODO: verify sector[510] and sector[511] are equal to 0xAA
-	
+
+
+
+void EX_PRINT_STR(uint8_t *str){
+    printf("%s",str);
+}
+
+void EX_PRINT_STR_LEN(uint8_t *str, uint32_t len){
+    for(uint32_t i = 0; i < len; i++){
+        printf("%c",str[i]);
+    }
+}
+
+void EX_PRINT_CHAR(uint8_t c){
+    printf("%c",c);
+}
+
+void EX_ERROR(uint8_t *str){
+    ANSI_String_Set(&ANSI_ERROR);
+    EX_PRINT_STR(str);
+    ANSI_Reset();
+}
+typedef enum{
+    Command_LS_k,
+    Command_Unknown_k,
+}Command_k;
+void Command_LS(FAT_Device *device, FAT_Directory *dir, FILE* fp);
+
+void Exec_Command(FAT_Device *device, FAT_Directory *dir, FILE* fp, Command_k command){
+    switch(command){
+        case Command_LS_k:
+            Command_LS(device, dir, fp);
+            break;
+        case Command_Unknown_k:
+            EX_ERROR("Unknown command\n");
+            break;
+    }
+    EX_PRINT_CHAR('\n');
+    EX_PRINT_CHAR('\r');
+}
+
+void Command_LS(FAT_Device *device, FAT_Directory *dir, FILE* fp){
+        for(int i = 0; i < dir->size; i++){
+            FAT_Dir_Entry entry = FAT_Device_get_dir(device, fp, dir->locations[i].sector, dir->locations[i].entry);
+            if(entry.Base.DIR_Attr & 0x10){
+                ANSI_String_Set(&ANSI_FOLDER);
+                }else{
+                ANSI_String_Set(&ANSI_FILE);
+            }
+            FAT_Device_print_dir_name(
+                    device,
+                    fp,
+                    entry,
+                    dir->locations[i].sector,
+                    dir->locations[i].entry
+            );
+            ANSI_Reset();
+            EX_PRINT_CHAR(' ');
+        }
+}
+
+
 int main(int argc, char *argv[])
 {
 	FILE *fptr;
@@ -45,6 +107,16 @@ int main(int argc, char *argv[])
 	};
 	
 	FAT_Device d = FAT_Device_init(fptr, &cache);
+    FAT_Dir_Entry_Location locations[100] = {0};
+    FAT_Directory dir = {
+            .cluster = 0,
+            .locations = &locations[0],
+            .size = 0,
+            .capacity = 100,
+    };
+
+    FAT_Directory_collect(&dir, &d, fptr);
+    Exec_Command(&d, &dir, fptr, Command_LS_k);
 
 	return 0;
 }
