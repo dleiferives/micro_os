@@ -3,6 +3,7 @@
 #define MAX_OEM_NAME_LENGTH 8
 #include <stdlib.h>
 #include <stdio.h>
+#include "lru_cache.h"
 extern int GLOBAL_FAT_DEVICE_SECTORS_IN_RAM;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -268,7 +269,9 @@ typedef struct {
     long RootDirSectors;
 
 
-    FAT_Sector * sectors;
+	Cache_t *sector_cache;
+    Cache_get_t get_sector;
+
 } FAT_Device;
 
 typedef enum {
@@ -283,7 +286,7 @@ typedef enum {
 
 typedef struct {
 	unsigned char DIR_Name[11];
-	FAT_DIR_ENTRY_ATTR DIR_Attr;
+	unsigned char DIR_Attr;
 	unsigned char DIR_NTRes; // must be set to 0
 	unsigned char DIR_CrtTimeTenth;
 	u16 DIR_CrtTime;
@@ -294,7 +297,24 @@ typedef struct {
 	u16 DIR_WrtDate;
 	u16 DIR_FstClusLO;
 	u32 DIR_FileSize;
+}FAT_Dir_Entry_Base;
+
+typedef struct {
+	unsigned char LDIR_Ord;
+	unsigned char LDIR_Name1[10];
+	unsigned char LDIR_Attr;
+	unsigned char LDIR_Type;
+	unsigned char LDIR_Chksum;
+	unsigned char LDIR_Name2[12];
+	unsigned short LDIR_FstClusLO;
+	unsigned char LDIR_Name3[4];
+}FAT_Dir_Entry_Long;
+
+typedef union {
+	FAT_Dir_Entry_Base Base;
+	FAT_Dir_Entry_Long Long;
 }FAT_Dir_Entry;
+
 
 unsigned int read_bytes_to_int(FILE *fp, int *cursor_loc, int offset_start,
                                int offset, int size);
@@ -304,12 +324,12 @@ void read_bytes_to_char_arr(FILE *fp, unsigned char *source, int *cursor,
 
 int FAT_Device_identify_fat_type_and_init(FAT_Device *d, int *c, FILE *fp);
 
-FAT_Device FAT_Device_init(FILE *fp);
+FAT_Device FAT_Device_init(FILE *fp, Cache_t *cache);
 
 int FAT_Device_first_sector_of_cluster(FAT_Device *d, int n);
 
 int FAT_Device_get_cluster_sector_number(FAT_Device *d, int cluster_number);
-int FAT_Device_get_cluster_entry_offset(FAT_Device *d, int cluster_number);
+int FAT_Device_get_cluster_fat_sector_offset(FAT_Device *d, int cluster_number);
 
 // TODO this could be so much cleaner.
 // way too much nesting
@@ -332,4 +352,50 @@ void FAT_Device_Sector_read_to_char_arr(FAT_Device *d, FILE *fp, int sector_numb
 unsigned int FAT_Device_Sector_read_to_int(FAT_Device *d, FILE *fp, int sector_number,unsigned int start_offset, unsigned int offset, unsigned int size);
 
 FAT_Dir_Entry FAT_Device_get_dir(FAT_Device *d, FILE *fp, int sector_number, int entry_number);
+extern char BUFFER[1024];
+int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number, int entry_number, int indent);
+
+unsigned char FAT_Device_print_dir_name(FAT_Device *d, FILE *fp,FAT_Dir_Entry e, int sector_number, int entry_number);
+
+unsigned char FAT_Device_print_dir_long_name(FAT_Device *d, FILE *fp,FAT_Dir_Entry_Long l, int sector_number, int entry_number, unsigned char checksum);
+
+unsigned int  FAT_Device_get_next_cluster(FAT_Device *d, FILE *fp, int cluster_number);
+
+int FAT_Device_get_cluster_entry_offset(FAT_Device *d, int cluster_number);
+
+
+
+void FAT_generate_short_name(char *long_filename, char *short_name);
+
+void FAT_write_lfn_entry(FAT_Device *d,FILE *fp, int dir_sector, int entry_index, FAT_Dir_Entry_Long *lfn_entry);
+
+void FAT_write_sfn_entry(FAT_Device *d, FILE *fp, int dir_sector, int entry_index, FAT_Dir_Entry *sfn_entry);
+
+unsigned int FAT_Device_write_dir_entry(FAT_Device *d, FILE *fp, int dir_sector, int entry_pos, char *long_filename, FAT_Dir_Entry *new_entry);
+
+unsigned int FAT_Device_allocate_cluster(FAT_Device *d, FILE *fp);
+
+int FAT_Device_find_free_dir_entry(FAT_Device *d, FILE *fp, unsigned int dir_sector, const char *long_filename);
+
+void FAT_Device_write_sector(FAT_Device *d, FILE *fp, unsigned int sector, const uint8_t *data, size_t size);
+
+void FAT_Device_set_next_cluster(FAT_Device *d, FILE *fp, unsigned int current_cluster, unsigned int next_cluster); 
+
+// Writes a file to the directory at the given sector
+int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *filename, const uint8_t *content, size_t content_size);
+unsigned short FAT_Device_12_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned short value);
+
+unsigned int FAT_Device_32_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned int value);
+
+unsigned short FAT_Device_16_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned short value);
+
+unsigned int FAT_Device_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned int value) ;
+unsigned char FAT_Dir_Entry_Base_checksum(FAT_Dir_Entry_Base *e);
+
+void FAT_Device_set_dir(FAT_Device *d, FILE *fp, int sector_number, int entry_number, FAT_Dir_Entry e);
+
+unsigned char FAT_Device_remove_dir_long(FAT_Device *d, FILE *fp,FAT_Dir_Entry *l, int sector_number, int entry_number, unsigned char checksum);
+unsigned char FAT_Device_remove_dir(FAT_Device *d, FILE *fp,FAT_Dir_Entry e, int sector_number, int entry_number);
+
+unsigned int FAT_Device_delete_cluster_chain(FAT_Device *d, FILE *fp, unsigned int cluster);
 #endif
