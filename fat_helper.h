@@ -318,7 +318,7 @@ typedef union {
 typedef struct{
     unsigned int sector;
     unsigned int entry;
-    uint8_t attr;
+    uint32_t hash;
 }FAT_Dir_Entry_Location;
 
 typedef struct{
@@ -402,10 +402,12 @@ int FAT_Device_find_free_dir_entry(FAT_Device *d, FILE *fp, unsigned int dir_sec
 
 void FAT_Device_write_sector(FAT_Device *d, FILE *fp, unsigned int sector, const uint8_t *data, size_t size);
 
+int FAT_Device_create_directory(FAT_Device *d, FILE *fp, char *directory_name, unsigned int parent_cluster);
+
 void FAT_Device_set_next_cluster(FAT_Device *d, FILE *fp, unsigned int current_cluster, unsigned int next_cluster); 
 
 // Writes a file to the directory at the given sector
-int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *filename, const uint8_t *content, size_t content_size);
+int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *filename, uint8_t *content, size_t content_size);
 unsigned short FAT_Device_12_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned short value);
 
 unsigned int FAT_Device_32_set_cluster_entry_val(FAT_Device *d, FILE *fp, int cluster_number, unsigned int value);
@@ -421,4 +423,7 @@ unsigned char FAT_Device_remove_dir_long(FAT_Device *d, FILE *fp,FAT_Dir_Entry *
 unsigned char FAT_Device_remove_dir(FAT_Device *d, FILE *fp,FAT_Dir_Entry e, int sector_number, int entry_number);
 
 unsigned int FAT_Device_delete_cluster_chain(FAT_Device *d, FILE *fp, unsigned int cluster);
+int32_t FAT_Device_get_dir_location(FAT_Device *d, FILE *fp, FAT_Directory *dir, char *filename);
+void FAT_Device_print_file_contents(FAT_Device *d, FILE *fp, unsigned int cluster, unsigned int size);
+uint32_t hash_string(uint8_t *str);
 #endif

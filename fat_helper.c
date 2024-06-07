@@ -5,6 +5,15 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+uint32_t hash_string(uint8_t *str) {
+    uint32_t hash = 5381;
+    int c = 0;
+    for(int i =0; i<11; i++, c = str[i]){
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash;
+}
+
 void FAT_Directory_collect(FAT_Directory *dir, FAT_Device *device, FILE *fp){
     int cluster = dir->cluster;
     dir->size =0;
@@ -18,7 +27,8 @@ void FAT_Directory_collect(FAT_Directory *dir, FAT_Device *device, FILE *fp){
                     if(entry.Base.DIR_Name[0] == 0x00 || entry.Base.DIR_Name[0] == 0xE5 || entry.Base.DIR_Attr == 0x0F){
                         continue;
                     }
-                    dir->locations[dir->size++] = (FAT_Dir_Entry_Location){sector + i, j, entry.Base.DIR_Attr};
+//                    printf("Entry Name %s\n", entry.Base.DIR_Name);
+                    dir->locations[dir->size++] = (FAT_Dir_Entry_Location){sector + i, j,hash_string(entry.Base.DIR_Name)};
                     if(dir->size == dir->capacity){
                         return;
                     }
@@ -39,7 +49,9 @@ void FAT_Directory_collect(FAT_Directory *dir, FAT_Device *device, FILE *fp){
                 entry_idx++;
                 continue;
             }
-            dir->locations[dir->size++] = (FAT_Dir_Entry_Location){sector, entry_idx, entry.Base.DIR_Attr};
+            // print out the short name as hex
+//            printf("Entry Name %s\n", entry.Base.DIR_Name);
+            dir->locations[dir->size++] = (FAT_Dir_Entry_Location){sector, entry_idx, hash_string(entry.Base.DIR_Name)};
             if(dir->size == dir->capacity){
                 return;
             }
@@ -79,7 +91,7 @@ void read_bytes_to_char_arr(FILE *fp, unsigned char *source, int *cursor, int of
 //		offset_start);
 	for (int i = 0; i < size; i++) {
 		source[i] = getc(fp);
-		putchar(source[i]);
+//		putchar(source[i]);
 		*cursor = *cursor + 1;
 	}
 }
@@ -254,33 +266,54 @@ FAT_Device FAT_Device_init(FILE *fp, Cache_t *cache) {
 	return d;
 }
 
-void FAT_generate_short_name(char *long_filename, char *short_name)
-{
-    // This is a very simplified version of generating a short filename
-    int i = 0;
-    for (; i < 6 && long_filename[i] && long_filename[i] != '.'; i++)
-    {
-        short_name[i] = toupper((unsigned char) long_filename[i]);
+void FAT_generate_short_name(char  *long_filename, char *short_name) {
+    memset(short_name, 0x20, 11); // Initialize short_name
+
+    // Find the last occurrence of '.'
+    const char *dot = strrchr(long_filename, '.');
+    int name_length = (dot == NULL) ? strlen(long_filename) : (dot - long_filename);
+
+    // Limit name_length to 8 for the name part
+    name_length = (name_length > 8) ? 8 : name_length;
+
+    // Copy the name part and convert to uppercase
+    for (int i = 0; i < name_length; i++) {
+        char ch = long_filename[i];
+        // Skip invalid characters as per the spec
+        if (ch < 0x20 || strchr("\"*+,./:;<=>?[\\]|", ch)) continue;
+        short_name[i] = toupper((unsigned char)ch);
     }
-    short_name[i++] = '~';
-    for(; i < 11 && long_filename[i] && long_filename[i] != '.'; i++){
-        short_name[i] = toupper((unsigned char) long_filename[i]);
+
+    if (dot && dot[1] != '\0') { // There is an extension
+        int ext_length = strlen(dot + 1);
+        ext_length = (ext_length > 3) ? 3 : ext_length; // Limit extension to 3 characters
+
+        // Copy the extension part and convert to uppercase
+        for (int i = 0; i < ext_length; i++) {
+            char ch = dot[i + 1];
+            // Skip invalid characters as per the spec
+            if (ch < 0x20 || strchr("\"*+,./:;<=>?[\\]|", ch)) continue;
+            short_name[8 + i] = toupper((unsigned char)ch);
+        }
     }
-    for(; i < 11; i++){
-        short_name[i] = '\0';
-    }
+
+//    short_name[11] = '\0'; // Null-terminate the short name
 }
 
 void FAT_write_lfn_entry(FAT_Device *d,FILE *fp, int dir_sector, int entry_index, FAT_Dir_Entry_Long *lfn_entry) {
     // Seek to the correct position in the sector and write the LFN entry
     fseek(fp, (dir_sector * d->BPB_BytsPerSec) + (entry_index * sizeof(char) * 32), SEEK_SET);
     fwrite(lfn_entry, sizeof(char), 32, fp);
+    fflush(fp);
+    FAT_Device_load_sector(d, fp, dir_sector);
 }
 
 void FAT_write_sfn_entry(FAT_Device *d, FILE *fp, int dir_sector, int entry_index, FAT_Dir_Entry *sfn_entry) {
     // Seek to the correct position in the sector and write the SFN entry
     fseek(fp, (dir_sector * d->BPB_BytsPerSec) +(entry_index * sizeof(char) * 32), SEEK_SET);
     fwrite(sfn_entry, sizeof(char), 32, fp);
+    fflush(fp);
+    FAT_Device_load_sector(d, fp, dir_sector);
 }
 
 unsigned int FAT_Device_write_dir_entry(FAT_Device *d, FILE *fp, int dir_sector, int entry_pos, char *long_filename, FAT_Dir_Entry *new_entry) {
@@ -290,55 +323,79 @@ unsigned int FAT_Device_write_dir_entry(FAT_Device *d, FILE *fp, int dir_sector,
 
     // Generate a short filename (Simplified conversion, not handling all edge cases)
     char short_name[12];
-    FAT_generate_short_name(long_filename, short_name);
-
-    // Pointer to the last LFN entry to write (we write from last to first)
-    int entry_index = num_lfn_entries;
-    for(int i =0 ; i < 11; i++){
-        new_entry->Base.DIR_Name[i] = short_name[i];
-    }
-    // Write LFN entries
-    for (int i = 0; i < num_lfn_entries; i++) {
-        FAT_Dir_Entry_Long lfn_entry;
-        memset(&lfn_entry, 0, sizeof(FAT_Dir_Entry_Long));
-        lfn_entry.LDIR_Attr = 0x0F;  // LFN attribute
-        lfn_entry.LDIR_Ord = num_lfn_entries - i;  // Order of this LFN entry
-        if (i == 0) {
-            lfn_entry.LDIR_Ord |= 0x40;  // Last logical LFN entry
+    if(long_filename[0] == '.' && long_filename[1] == 0){
+        short_name[0] = '.';
+        short_name[1] = 0x20;
+        for(int i = 2; i < 11; i++){
+            short_name[i] = 0x20;
         }
-        // checksum calculation
-        unsigned char checksum = 0;
-        for (int i_ch = 0; i_ch < 11; i_ch++) {
-            checksum = ((checksum & 1) ? 0x80 : 0) + (checksum >> 1) + short_name[i_ch];
+        num_lfn_entries = 0;
+    } else if (long_filename[0] == '.' && long_filename[1] == '.' && long_filename[2] == 0){
+        short_name[0] = '.';
+        short_name[1] = '.';
+        for(int i = 2; i < 11; i++){
+            short_name[i] = 0x20;
         }
+        num_lfn_entries = 0;
+    } else
+    {
+        FAT_generate_short_name(long_filename, short_name);
 
-        lfn_entry.LDIR_Chksum = FAT_Dir_Entry_Base_checksum(&new_entry->Base);
-
-        // Fill the name fields
-        int start_char = i * 13;
-        for (int j = 0; j < 12 && (start_char + j) < len; j++) {
-            if( j < 5){
-                lfn_entry.LDIR_Name1[j<<1] = long_filename[start_char + j];
-                lfn_entry.LDIR_Name1[1 + (j<<1)] = 0;
-            } else if(j < 10){
-                lfn_entry.LDIR_Name2[(j-5) << 1] = long_filename[start_char + j];
-                lfn_entry.LDIR_Name1[1 + ((j-5)<<1)] = 0;
-            } else {
-                lfn_entry.LDIR_Name3[(j-10) << 1] = long_filename[start_char + j];
-                lfn_entry.LDIR_Name1[1 + ((j-10)<<1)] = 0;
+        // Pointer to the last LFN entry to write (we write from last to first)
+        int entry_index = num_lfn_entries;
+        for (int i = 0; i < 11; i++)
+        {
+            new_entry->Base.DIR_Name[i] = short_name[i];
+        }
+        // Write LFN entries
+        for (int i = 0; i < num_lfn_entries; i++)
+        {
+            FAT_Dir_Entry_Long lfn_entry;
+            memset(&lfn_entry, 0, sizeof(FAT_Dir_Entry_Long));
+            lfn_entry.LDIR_Attr = 0x0F;  // LFN attribute
+            lfn_entry.LDIR_Ord = num_lfn_entries - i;  // Order of this LFN entry
+            if (i == 0)
+            {
+                lfn_entry.LDIR_Ord |= 0x40;  // Last logical LFN entry
             }
+            // checksum calculation
+            unsigned char checksum = 0;
+            for (int i_ch = 0; i_ch < 11; i_ch++)
+            {
+                checksum = ((checksum & 1) ? 0x80 : 0) + (checksum >> 1) + short_name[i_ch];
+            }
+
+            lfn_entry.LDIR_Chksum = FAT_Dir_Entry_Base_checksum(&new_entry->Base);
+
+            // Fill the name fields
+            int start_char = i * 13;
+            for (int j = 0; j < 12 && (start_char + j) < len; j++)
+            {
+                if (j < 5)
+                {
+                    lfn_entry.LDIR_Name1[j << 1] = long_filename[start_char + j];
+                    lfn_entry.LDIR_Name1[1 + (j << 1)] = 0;
+                } else if (j < 10)
+                {
+                    lfn_entry.LDIR_Name2[(j - 5) << 1] = long_filename[start_char + j];
+                    lfn_entry.LDIR_Name1[1 + ((j - 5) << 1)] = 0;
+                } else
+                {
+                    lfn_entry.LDIR_Name3[(j - 10) << 1] = long_filename[start_char + j];
+                    lfn_entry.LDIR_Name1[1 + ((j - 10) << 1)] = 0;
+                }
+            }
+
+            // Write the LFN entry to disk
+            FAT_write_lfn_entry(d, fp, dir_sector, entry_pos + i, &lfn_entry);
+            entry_index--;
         }
-
-        // Write the LFN entry to disk
-        FAT_write_lfn_entry(d,fp, dir_sector,  entry_pos + i, &lfn_entry);
-        entry_index--;
     }
-
     // Write the short name entry
     for(int i =0 ; i < 11; i++){
         new_entry->Base.DIR_Name[i] = short_name[i];
     }
-    new_entry->Base.DIR_Attr = 0x20;  // Archive attribute, for example
+    new_entry->Base.DIR_Attr |= 0x20;  // Archive attribute, for example
 
     // Write the SFN entry to disk
     FAT_write_sfn_entry(d,fp, dir_sector, entry_pos + num_lfn_entries, new_entry);
@@ -391,7 +448,7 @@ int FAT_Device_find_free_dir_entry(FAT_Device *d, FILE *fp, unsigned int dir_sec
         if (entry.Base.DIR_Name[0] == 0x00 || entry.Base.DIR_Name[0] == 0xE5) {  // Check if entry is free or marked as deleted
             free_entries_found++;
             if (free_entries_found == total_entries_needed) {
-                return entry_index - (total_entries_needed - 1);  // Return the index of the first free entry
+                return entry_index - (total_entries_needed);  // Return the index of the first free entry
             }
         } else {
             free_entries_found = 0;  // Reset the counter as we need contiguous entries
@@ -425,13 +482,16 @@ void FAT_Device_write_sector(FAT_Device *d, FILE *fp, unsigned int sector, const
 
     // Flush the changes to ensure data is written to the disk or disk image
     fflush(fp);
+
+    // Update the cache
+    FAT_Device_load_sector(d, fp, sector);
 }
 void FAT_Device_set_next_cluster(FAT_Device *d, FILE *fp, unsigned int current_cluster, unsigned int next_cluster) {
     FAT_Device_set_cluster_entry_val(d, fp, current_cluster, next_cluster);
 }
 
 // Writes a file to the directory at the given sector
-int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *filename, const uint8_t *content, size_t content_size) {
+int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *filename, uint8_t *content, size_t content_size) {
     // Step 0: Find if there is a file with the same name
     uint8_t short_filename[11];
     FAT_generate_short_name(filename, short_filename);
@@ -456,7 +516,7 @@ int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *file
             fprintf(stderr, "No free directory entries available\n");
             return -1;
         }
-        printf("Entry position: %d\n", entry_pos);
+//        printf("Entry position: %d\n", entry_pos);
 
         // Step 2: Allocate a cluster for the file data
         first_cluster = FAT_Device_allocate_cluster(d, fp);
@@ -523,6 +583,118 @@ int FAT_Device_write_file(FAT_Device *d, FILE *fp, int dir_sector, uint8_t *file
     return des_entry;
 }
 
+int FAT_Device_create_directory(FAT_Device *d, FILE *fp, char *directory_name, unsigned int parent_cluster) {
+    // Step 0: Find if there is a file with the same name
+    uint8_t short_filename[11];
+    FAT_generate_short_name(directory_name, short_filename);
+    uint32_t dir_sector = FAT_Device_first_sector_of_cluster(d, parent_cluster);
+    FAT_Device_load_sector(d, fp, dir_sector);
+    unsigned int first_cluster;
+    unsigned int des_entry;
+    uint8_t found = 0;
+    uint32_t entry_index = 0;
+    FAT_Dir_Entry entry;
+    for (int j = 0; j < d->BPB_BytsPerSec / 32; j++) {
+        entry = FAT_Device_get_dir(d, fp, dir_sector, j);
+        if (memcmp(entry.Base.DIR_Name, short_filename, 11) == 0) {
+            found = 1;
+            entry_index = j;
+            break;
+        }
+    }
+    if(!found){
+        // Step 1: Find a free directory entry in the directory sector
+        int entry_pos = FAT_Device_find_free_dir_entry(d, fp, dir_sector, directory_name);
+        if (entry_pos < 0) {
+            fprintf(stderr, "No free directory entries available\n");
+            return -1;
+        }
+        printf("Entry position: %d\n", entry_pos);
+
+        // Allocate a cluster for the new directory
+        unsigned int new_dir_cluster = FAT_Device_allocate_cluster(d, fp);
+        if (new_dir_cluster == 0xFFFFFFFF) {
+            fprintf(stderr, "Failed to allocate a new cluster for the directory.\n");
+            return -1;
+        }
+
+        // Prepare the directory sector
+        unsigned int new_dir_sector = FAT_Device_first_sector_of_cluster(d, new_dir_cluster);
+        FAT_Device_load_sector(d, fp, new_dir_sector); // Assume the sector is cleared to 0s on allocation
+
+        // Create the "." entry
+        FAT_Dir_Entry dot_entry;
+        memset(&dot_entry, 0, sizeof(FAT_Dir_Entry));
+        strcpy((char *)dot_entry.Base.DIR_Name, ".          "); // 11 characters, space-padded
+        dot_entry.Base.DIR_Attr = 0x10; // Directory attribute
+        dot_entry.Base.DIR_FstClusLO = new_dir_cluster & 0xFFFF;
+        dot_entry.Base.DIR_FstClusHI = (new_dir_cluster >> 16) & 0xFFFF;
+        dot_entry.Base.DIR_FileSize = 0; // No file size for directories
+
+        // Write the "." entry to the first directory entry
+        FAT_Device_write_dir_entry(d, fp, new_dir_sector, 0, ".", &dot_entry);
+
+        // Create the ".." entry
+        FAT_Dir_Entry dotdot_entry;
+        memset(&dotdot_entry, 0, sizeof(FAT_Dir_Entry));
+        strcpy((char *)dotdot_entry.Base.DIR_Name, "..         "); // 11 characters, space-padded
+        dotdot_entry.Base.DIR_Attr = 0x10; // Directory attribute
+        if (parent_cluster == 0) { // Root directory special case for FAT12/16, which has no cluster number
+            dotdot_entry.Base.DIR_FstClusLO = 0;
+            dotdot_entry.Base.DIR_FstClusHI = 0;
+        } else {
+            dotdot_entry.Base.DIR_FstClusLO = parent_cluster & 0xFFFF;
+            dotdot_entry.Base.DIR_FstClusHI = (parent_cluster >> 16) & 0xFFFF;
+        }
+
+        // Write the ".." entry to the second directory entry
+        FAT_Device_write_dir_entry(d, fp, new_dir_sector, 1, "..", &dotdot_entry);
+
+        // Mark the end of the cluster chain
+        FAT_Device_set_next_cluster(d, fp, new_dir_cluster, 0xFFFFFFFF);
+
+
+        // Prepare the directory entry
+        FAT_Dir_Entry new_entry;
+        memset(&new_entry, 0, sizeof(FAT_Dir_Entry));
+        memcpy(new_entry.Base.DIR_Name, directory_name, 11);
+        new_entry.Base.DIR_FstClusLO = new_dir_cluster & 0xFFFF;
+        new_entry.Base.DIR_FstClusHI = (new_dir_cluster >> 16) & 0xFFFF;
+        new_entry.Base.DIR_FileSize = 0;
+        new_entry.Base.DIR_Attr = 0x10; // Directory attribute
+
+        // Write the directory entry
+        FAT_Device_write_dir_entry(d, fp, dir_sector, entry_pos, directory_name, &new_entry);
+
+        return entry_pos; // Return the cluster number of the new directory
+    }
+    EX_ERROR("Directory already exists\n");
+    return -1;
+}
+
+void FAT_Device_print_file_contents(FAT_Device *d, FILE *fp, unsigned int cluster, unsigned int size) {
+    unsigned int sector, b_cursor = 0;
+    while (size > 0 && cluster != 0xFFFFFFFF) {
+        sector = FAT_Device_first_sector_of_cluster(d, cluster);
+        unsigned int bytes_to_read = (size < d->BPB_BytsPerSec * d->BPB_SecPerClus) ? size : d->BPB_BytsPerSec * d->BPB_SecPerClus;
+        for (unsigned int i = 0; i < bytes_to_read; i++) {
+            if (i % d->BPB_BytsPerSec == 0) {  // Load new sector when needed
+                if (!Cache_contains(d->sector_cache, sector)) {
+                    FAT_Device_load_sector(d, fp, sector);
+                }
+            }
+            uint8_t *sector_data = d->get_sector(d->sector_cache, sector);
+            putchar(sector_data[i % d->BPB_BytsPerSec]);
+            if (++b_cursor % d->BPB_BytsPerSec == 0) {
+                sector++;
+            }
+        }
+        size -= bytes_to_read;
+        cluster = FAT_Device_get_next_cluster(d, fp, cluster);
+    }
+//    putchar(10);  // New line after file content
+}
+
 int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number, int entry_number, int indent){
 	FAT_Dir_Entry first = FAT_Device_get_dir(d, fp, sector_number, entry_number);
 	// skip any non directories/ files
@@ -551,7 +723,9 @@ int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number
 		do{
 			sector = FAT_Device_first_sector_of_cluster(d, cluster);
 			for(int i =0; i < d->BPB_SecPerClus; i++){
-				FAT_Device_load_sector(d, fp, sector + i);
+                if(!Cache_contains(d->sector_cache, sector + i)){
+                    FAT_Device_load_sector(d, fp, sector + i);
+                }
 				for(int j = 0; j < entries; j++){
 					//                    FAT_Dir_Entry second = FAT_Device_get_dir(d, fp, sector, j);
 					FAT_Device_sector_print_recursive(d, fp, sector + i, j, indent + 1);
@@ -577,7 +751,9 @@ int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number
 		unsigned int b_cursor = 0;
 		for(int j = 0; j < clusters && b_cursor < size; j++){
 			sector = FAT_Device_first_sector_of_cluster(d, cluster);
-			FAT_Device_load_sector(d, fp, sector);
+            if(!Cache_contains(d->sector_cache, sector)){
+                FAT_Device_load_sector(d, fp, sector);
+            }
 			for(int k = 0; k < d->BPB_SecPerClus && b_cursor < size; k++){
 				for(int l = 0; l < d->BPB_BytsPerSec && b_cursor < size; l++){
 					uint8_t *sector_data = d->get_sector(d->sector_cache, sector + k);
@@ -592,7 +768,9 @@ int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number
 		}
 		if(remainder){
 			sector = FAT_Device_first_sector_of_cluster(d, cluster);
-			FAT_Device_load_sector(d, fp, sector);
+            if(!Cache_contains(d->sector_cache, sector)){
+                FAT_Device_load_sector(d, fp, sector);
+            }
 			for(int j = 0; j < d->BPB_BytsPerSec && b_cursor < size; j++){
 				uint8_t *sector_data = d->get_sector(d->sector_cache, sector);
 				putchar(sector_data[j]);
@@ -604,6 +782,9 @@ int FAT_Device_sector_print_recursive(FAT_Device *d, FILE *fp, int sector_number
 }
 
 int FAT_Device_first_sector_of_cluster(FAT_Device *d, int n) {
+    if(n == 0){
+        return d->BPB_RsvdSecCnt + (d->BPB_NumFATs * d->BPB_FATSz16);
+    }
 	return ((n - 2) * d->BPB_SecPerClus) + d->FirstDataSector;
 }
 
@@ -626,6 +807,14 @@ unsigned int FAT_Device_delete_cluster_chain(FAT_Device *d, FILE *fp, unsigned i
     }
     unsigned int next_cluster = FAT_Device_get_next_cluster(d, fp, cluster);
     FAT_Device_set_next_cluster(d, fp, cluster, 0);
+    // set the sector to zeros
+    unsigned int sector = FAT_Device_first_sector_of_cluster(d, cluster);
+    unsigned int num_sectors = d->BPB_SecPerClus;
+    for(int i = 0; i < num_sectors; i++){
+        uint8_t *sector_data = d->get_sector(d->sector_cache, sector + i);
+        memset(sector_data, 0, d->BPB_BytsPerSec);
+        FAT_Device_write_sector(d, fp, sector + i, sector_data, d->BPB_BytsPerSec);
+    }
     return FAT_Device_delete_cluster_chain(d, fp, next_cluster) + 1;
 }
 
@@ -683,11 +872,10 @@ int FAT_Device_get_cluster_fat_sector_offset(FAT_Device *d, int cluster_number) 
 
 void FAT_Device_load_sector(FAT_Device *d, FILE *fp, int sector_num) {
 
-
-
 	uint8_t *sector_data = d->get_sector(d->sector_cache, sector_num);
 	// might as well just read it now from file istead of setting to zeros
 	// TODO implement global reading functions rather than some FSEEKs and such
+
 	fseek(fp, sector_num * d->BPB_BytsPerSec, SEEK_SET);
 
 	for (int i = 0; i < d->BPB_BytsPerSec; i++) {
@@ -860,7 +1048,9 @@ unsigned int FAT_Device_Sector_read_to_int(FAT_Device *d, FILE *fp, int sector_n
 FAT_Dir_Entry FAT_Device_get_dir(FAT_Device *d, FILE *fp, int sector_number, int entry_number)
 {
 	FAT_Dir_Entry_Base e;
-	FAT_Device_load_sector(d, fp, sector_number);
+    if(!Cache_contains(d->sector_cache, sector_number)){
+        FAT_Device_load_sector(d, fp, sector_number);
+    }
 
 	unsigned int offset = 32 * entry_number;
 	FAT_Device_Sector_read_to_char_arr(d, fp, sector_number, e.DIR_Name,offset, 0, 11);
@@ -933,7 +1123,7 @@ unsigned char FAT_Device_print_dir_name(FAT_Device *d, FILE *fp,FAT_Dir_Entry e,
 //		printf("DIR_Name1: ");
 		for (int i = 0; i < 11; i++)
 		{
-			putchar(e.Base.DIR_Name[i]);
+			EX_PRINT_CHAR(e.Base.DIR_Name[i]);
 		}
 		return 1;
 	}
@@ -954,7 +1144,7 @@ unsigned char FAT_Device_print_dir_name(FAT_Device *d, FILE *fp,FAT_Dir_Entry e,
 //		printf("DIR_Name:2 ");
 		for (int i = 0; i < 11; i++)
 		{
-			putchar(e.Base.DIR_Name[i]);
+            EX_PRINT_CHAR(e.Base.DIR_Name[i]);
 		}
 		return 1;
 
@@ -964,7 +1154,7 @@ unsigned char FAT_Device_print_dir_name(FAT_Device *d, FILE *fp,FAT_Dir_Entry e,
 //	printf("DIR_Name3: ");
 	for (int i = 0; i < 11; i++)
 	{
-		putchar(e.Base.DIR_Name[i]);
+        EX_PRINT_CHAR(e.Base.DIR_Name[i]);
 	}
 	return 1;
 }
@@ -985,15 +1175,15 @@ unsigned char FAT_Device_print_dir_long_name(FAT_Device *d, FILE *fp,FAT_Dir_Ent
 		// print out the name!
 		for(int i = 0; i < 10; i+=2)
 		{
-			putchar(l.LDIR_Name1[i]);
+            EX_PRINT_CHAR(l.LDIR_Name1[i]);
 		}
 		for(int i = 0; i < 10; i+=2)
 		{
-			putchar(l.LDIR_Name2[i]);
+            EX_PRINT_CHAR(l.LDIR_Name2[i]);
 		}
 		for(int i = 0; i < 4; i+=2)
 		{
-			putchar(l.LDIR_Name3[i]);
+            EX_PRINT_CHAR(l.LDIR_Name3[i]);
 		}
 		// check if its the last entry
 		if(l.LDIR_Ord & 0x40)
@@ -1104,6 +1294,31 @@ unsigned char FAT_Device_remove_dir(FAT_Device *d, FILE *fp,FAT_Dir_Entry e, int
     FAT_Device_set_dir(d, fp, sector_number, entry_number, e);
     FAT_Device_delete_cluster_chain(d, fp, cluster);
     return 1;
+}
+
+int32_t FAT_Device_get_dir_location(FAT_Device *d, FILE *fp, FAT_Directory *dir, char *filename){
+    if(filename == NULL){
+        return -1;
+    }
+    uint8_t short_filename[11];
+    if(filename[0] == '.' && filename[1] == '.' && filename[2] == 0){
+        memcpy(short_filename, "..         ", 11);
+    } else if(filename[0] == '.' && filename[1] == 0){
+        memcpy(short_filename, ".          ", 11);
+    } else {
+        FAT_generate_short_name(filename, short_filename);
+    }
+//    printf("Short filename: %s\n", short_filename);
+    uint32_t hash = hash_string(short_filename);
+    for(int i = 0; i < dir->size; i++){
+        uint32_t entry_hash = dir->locations[i].hash;
+//        printf("Entry hash: %d\n", entry_hash);
+//        printf("Hash: %d\n", hash);
+        if(entry_hash == hash){
+            return i;
+        }
+    }
+    return -1;
 }
 
 void FAT_Directory_print(FAT_Directory *dir, FAT_Device *device, FILE *fp){

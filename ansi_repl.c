@@ -131,6 +131,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[30;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[30m");
       break;
     }
     break;
@@ -161,6 +162,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[31;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[31m");
       break;
     }
     break;
@@ -191,6 +193,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[32;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[32m");
       break;
     }
     break;
@@ -221,6 +224,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[33;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[33m");
       break;
     }
     break;
@@ -251,6 +255,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[34;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[34m");
       break;
     }
     break;
@@ -281,6 +286,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[35;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[35m");
       break;
     }
     break;
@@ -311,6 +317,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[36;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[36m");
       break;
     }
     break;
@@ -341,6 +348,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[37;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[37m");
       break;
     }
     break;
@@ -371,6 +379,7 @@ void ANSI_Colors_Set(ANSI_Colors_k fg, ANSI_Colors_k bg) {
       EX_PRINT_STR("\x1b[39;47m");
       break;
     default:
+        EX_PRINT_STR("\x1b[39m");
       break;
     }
     break;
