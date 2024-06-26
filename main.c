@@ -285,6 +285,8 @@ int main(int argc, char *argv[])
             Exec_Command_Data(&d, &dir, fptr, path, data, strlen(data), Command_TOUCH_k);
         } else if (sscanf(cmd, "mkdir %255s", path) == 1) {
             Exec_Command(&d, &dir, fptr, path, Command_MKDIR_k);
+        } else if (sscanf(cmd, "rm %255s", path) == 1) {
+            Exec_Command(&d, &dir, fptr, path, Command_RM_k);
         } else {
             EX_ERROR("Unknown command.\n");
         }
