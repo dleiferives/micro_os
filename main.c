@@ -1,14 +1,16 @@
+// Copyright Dylan Leifer-Ives
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "fat_helper.h"
 #include "lru_cache.h"
 #include "ansi_repl.h"
+// TODO change the usage of fp and fp seek to using the block based reading.
 
-//TODO: verify BPB_Bytes_Per_Sector * BPB_Sectors_Per_Cluster <= 1024 * 32;
-//TODO: verify sector[510] and sector[511] are equal to 0xAA
-
-
+#ifndef STML476RG_EMBEDDED
+uint8_t EX_GET_CHAR(void){
+    return getchar();
+}
 
 void EX_PRINT_STR(uint8_t *str){
     printf("%s",str);
@@ -24,11 +26,29 @@ void EX_PRINT_CHAR(uint8_t c){
     if(c != 0xFF) printf("%c",c);
 }
 
+void EX_FGETS(uint8_t *str, uint32_t len){
+    uint32_t i = 0;
+    while(i < len){
+        str[i] = EX_GET_CHAR();
+        if(str[i] == '\n'){
+            str[i] = 0;
+            break;
+        }
+        EX_PRINT_CHAR(str[i]);
+        i++;
+    }
+}
+
 void EX_ERROR(uint8_t *str){
     ANSI_String_Set(&ANSI_ERROR);
     EX_PRINT_STR(str);
     ANSI_Reset();
 }
+#else
+// TODO implement the embedded functions
+
+
+#endif
 typedef enum{
     Command_LS_k,
     Command_CD_k,
@@ -157,11 +177,6 @@ void Command_CAT(FAT_Device *device, FAT_Directory *dir, FILE* fp, uint8_t *path
 // touch [path] [data]
 void Command_TOUCH(FAT_Device *device, FAT_Directory *dir, FILE* fp, uint8_t *path, uint8_t *data, uint32_t data_len){
     FAT_Directory_collect(dir, device, fp);
-//    int32_t loc = FAT_Device_get_dir_location(device, fp, dir, path);
-//    if(loc != -1){
-//        EX_ERROR("File already exists");
-//        return;
-//    }
     uint32_t sector;
     if(dir->cluster == 0){
         sector = device->BPB_RsvdSecCnt + (device->BPB_NumFATs * device->BPB_FATSz16);
@@ -244,20 +259,14 @@ int main(int argc, char *argv[])
             .size = 0,
             .capacity = 100,
     };
-//    Exec_Command(&d, &dir, fptr, NULL, Command_LS_k);
-////    Exec_Command(&d, &dir, fptr, "waluigi", Command_CD_k);
-////    Exec_Command(&d, &dir, fptr, NULL, Command_LS_k);
-////    Exec_Command(&d, &dir, fptr, "..", Command_CD_k);
-////    Exec_Command(&d, &dir, fptr, NULL, Command_LS_k);
-//    Exec_Command(&d, &dir, fptr, "test2.txt", Command_CAT_k);
-//    Exec_Command_Data(&d, &dir, fptr, "test2.txt","dinosaurs are cool",18, Command_TOUCH_k);
-//    Exec_Command(&d, &dir, fptr, "test2.txt", Command_CAT_k);
     char cmd[256];
     char path[256];
     uint8_t data[1024];
+    EX_PRINT_STR("\x1b[2J");
+    EX_PRINT_STR("\x1b[1;1H");
     while (1) {
-        printf("> ");
-        fgets(cmd, sizeof(cmd), stdin);
+        EX_PRINT_STR("> ");
+        EX_FGETS(cmd, sizeof(cmd));
 
         // Parse command and execute
         if (strncmp(cmd, "exit", 4) == 0) {
@@ -276,14 +285,10 @@ int main(int argc, char *argv[])
             Exec_Command_Data(&d, &dir, fptr, path, data, strlen(data), Command_TOUCH_k);
         } else if (sscanf(cmd, "mkdir %255s", path) == 1) {
             Exec_Command(&d, &dir, fptr, path, Command_MKDIR_k);
-        } else if (sscanf(cmd, "rm %255s", path) == 1) {
-            Exec_Command(&d, &dir, fptr, path, Command_RM_k);
         } else {
-            printf("Unknown command.\n");
+            EX_ERROR("Unknown command.\n");
         }
     }
-//    Exec_Command(&d, &dir, fptr, "dir", Command_MKDIR_k);
-//    Exec_Command(&d, &dir, fptr, NULL, Command_LS_k);
 
     free(fptr);
 	return 0;
